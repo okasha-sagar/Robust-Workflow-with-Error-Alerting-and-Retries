@@ -1,0 +1,207 @@
+{
+  "name": "Global Error Handler - Order Workflow Alerts",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f2f2a9a1-2106-409f-b4f4-dff154b3b0d9",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const execution = $json.execution;\nconst wf = $json.workflow;\nreturn [{\n  json: {\n    workflowName: wf?.name || 'unknown',\n    errorMessage: execution?.error?.message || 'Unknown error',\n    nodeName: execution?.lastNodeExecuted || 'unknown',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "f42f93e2-8db6-42c5-9c14-86c60bdc8e64",
+      "name": "Extract Error Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "unhandled_exception",
+            "status": "failed",
+            "errorType": "unhandled_exception",
+            "errorMessage": "={{ $json.errorMessage }} (node: {{ $json.nodeName }})",
+            "timestamp": "={{ $json.timestamp }}",
+            "orderId": "={{ $json.orderId || 'unknown' }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "1ba05295-9885-4135-990f-37652c871ca1",
+      "name": "Log Unhandled Exception",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        400,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gXzAysXV4jUiDVvE",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "okashajaved.octacer@gmail.com",
+        "subject": "Order Workflow: Unhandled Exception",
+        "message": "={{ `UNHANDLED EXCEPTION in ${$json.workflowName} at node ${$json.nodeName}: ${$json.errorMessage} (${$json.timestamp})` }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        608,
+        0
+      ],
+      "id": "9af2e5dd-c25e-4d78-b605-0b83ff4ce511",
+      "name": "Alert - Unhandled Exception",
+      "webhookId": "faff372b-657b-4547-b628-28660cdeffbb",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Og3bcrNVQUuuEm4z",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Error Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Error Details": {
+      "main": [
+        [
+          {
+            "node": "Log Unhandled Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Unhandled Exception": {
+      "main": [
+        [
+          {
+            "node": "Alert - Unhandled Exception",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "97a46e63-a1d6-485e-b1b0-503dccde45a6",
+  "meta": {
+    "instanceId": "642eff7a7c7e2bf1faa410ff427f8947459bbb0c6feec4c8e2cf9f4b994f5841"
+  },
+  "nodeGroups": [],
+  "id": "Ak3CwpIV6juRsTZ5",
+  "tags": []
+}

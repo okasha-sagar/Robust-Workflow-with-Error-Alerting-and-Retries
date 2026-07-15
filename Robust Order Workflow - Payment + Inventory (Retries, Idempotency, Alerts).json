@@ -1,0 +1,1270 @@
+{
+  "name": "Robust Order Workflow - Payment + Inventory (Retries, Idempotency, Alerts)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "2f667d4b-2af1-4400-8c87-bd4dd1a244d5",
+      "name": "Webhook - Receive Order1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        1744
+      ],
+      "webhookId": "order-webhook-id-placeholder"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst orderId = body.orderId;\nconst customerId = body.customerId;\nconst amount = body.amount;\n\nif (orderId === undefined || customerId === undefined || amount === undefined) {\n  throw new Error('Missing required fields: orderId, customerId, amount');\n}\n\n// Optional fields that let you control which saved Postman mock example\n// is returned, so you can demo each error path on demand.\n// paymentTestMode: 'normal' (429 -> 500 -> 200), 'always_success', 'always_fail'\n// inventoryTestMode: 'success', 'conflict'\nconst paymentTestMode = body.paymentTestMode || 'normal';\nconst inventoryTestMode = body.inventoryTestMode || 'success';\n\nconst raw = `${orderId}|${customerId}|${amount}`;\nconst idempotencyKey = crypto.createHash('sha256').update(raw).digest('hex');\n\nreturn [{\n  json: {\n    orderId,\n    customerId,\n    amount,\n    idempotencyKey,\n    paymentTestMode,\n    inventoryTestMode,\n    receivedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "982fb472-8060-478d-8495-a5bab5bd9868",
+      "name": "Generate Idempotency Key1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        32,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "idempotencyKey",
+              "lookupValue": "={{ $json.idempotencyKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "13c7e98c-4ad0-494d-b04d-59720c192dfc",
+      "name": "Check Existing Key1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        1744
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gXzAysXV4jUiDVvE",
+          "name": "Google Sheets OAuth2 API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.idempotencyKey }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              },
+              "id": "898f65e7-ec79-4ec5-87e2-0eec9111362c"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0535f832-636a-41c2-813a-2b01e25f5277",
+      "name": "Key Exists?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        432,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json;\nlet statusCode = 200;\nif (row.status === 'failed') {\n  statusCode = row.errorType === 'non_retryable_status' ? 409 : 500;\n}\nreturn [{\n  json: {\n    statusCode,\n    body: {\n      status: row.status,\n      message: row.status === 'success'\n        ? 'Order already processed successfully (idempotent replay).'\n        : `Order previously failed: ${row.errorMessage || 'unknown error'}`\n    }\n  }\n}];"
+      },
+      "id": "4f3c4562-7098-453a-9da2-f29ed3110b87",
+      "name": "Build Cached Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "274057d6-27f8-499d-88c8-1279977c2459",
+      "name": "Respond - Cached Result1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        832,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $('Generate Idempotency Key1').item.json.idempotencyKey }}",
+            "orderId": "={{ $('Generate Idempotency Key1').item.json.orderId }}",
+            "timestamp": "={{ $('Generate Idempotency Key1').item.json.receivedAt }}",
+            "status": "pending",
+            "errorType": "",
+            "errorMessage": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "de53d54f-c629-4b6b-8ce5-e399bb1de642",
+      "name": "Insert Pending Log Row1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        640,
+        1872
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gXzAysXV4jUiDVvE",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const order = $('Generate Idempotency Key1').item.json;\nreturn [\n  { json: { ...order, attempt: 1 } },\n  { json: { ...order, attempt: 2 } },\n  { json: { ...order, attempt: 3 } }\n];"
+      },
+      "id": "363cb619-1d32-4462-909b-9f56a171658f",
+      "name": "Build Retry Attempts1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              },
+              "id": "0ba98dbb-caf8-4caa-8d3a-b91306ec87dd"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "891d8ee9-c22b-4ce8-a7e2-b0f73ac9f42d",
+      "name": "Payment Success?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ [429, 500].includes($json.statusCode) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "id": "dcfaefed-83cc-46fe-b71f-bd5390323f7c"
+            },
+            {
+              "leftValue": "={{ $('Retry Loop').item.json.attempt }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "id": "232e6c93-16fb-4650-bc54-3585f74501ba"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8d73cebb-5041-43d6-8306-7377a362e15d",
+      "name": "Retry Payment?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1632,
+        1968
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.pow(2, $('Retry Loop').item.json.attempt) }}"
+      },
+      "id": "189aadd3-9867-41b5-a09f-82d0034c4528",
+      "name": "Backoff Wait1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1840,
+        2064
+      ],
+      "webhookId": "f0ee199d-3cb0-435e-8e76-3b3aef603d54"
+    },
+    {
+      "parameters": {
+        "jsCode": "const attempt = $('Retry Loop').item.json.attempt;\nconst statusCode = $json.statusCode;\nconst order = $('Generate Idempotency Key1').item.json;\nconst errorType = ([429,500].includes(statusCode) && attempt >= 3) ? 'retry_exhausted' : 'non_retryable_status';\nreturn [{\n  json: {\n    idempotencyKey: order.idempotencyKey,\n    orderId: order.orderId,\n    errorType,\n    errorMessage: `Payment API failed with status ${statusCode} after ${attempt} attempt(s)`,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "6b87e35a-5d7d-4fce-9b38-eb6a7f1e01c8",
+      "name": "Build Payment Failure Details1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $json.idempotencyKey }}",
+            "status": "failed",
+            "errorType": "={{ $json.errorType }}",
+            "errorMessage": "={{ $json.errorMessage }}",
+            "timestamp": "={{ $json.timestamp }}",
+            "row_number": 0,
+            "orderId": "={{ $json.orderId }}"
+          },
+          "matchingColumns": [
+            "idempotencyKey"
+          ],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "67d7a6f5-0ed3-45d6-a24a-5476b6075fbf",
+      "name": "Update Log - Payment Failed1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2048,
+        1872
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gXzAysXV4jUiDVvE",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Build Payment Failure Details1').item.json;\nconst statusCode = d.errorType === 'non_retryable_status' ? 409 : 500;\nreturn [{ json: { statusCode, body: { status: 'failed', message: d.errorMessage } } }];"
+      },
+      "id": "0389cab7-058b-46fc-abb7-647f500bbe7b",
+      "name": "Build Payment Failure Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "bd986b92-2531-4b8a-9776-8a789c173460",
+      "name": "Respond - Payment Failed1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2656,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              },
+              "id": "851501fb-abc5-46c2-9f80-8464ff4036fe"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c8d1b4d5-5d63-400e-a94b-d9ee042ddec7",
+      "name": "Inventory Success?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1632,
+        1568
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $('Generate Idempotency Key1').item.json.idempotencyKey }}",
+            "status": "success",
+            "timestamp": "={{ new Date().toISOString() }}",
+            "row_number": 0,
+            "orderId": "={{ $('Generate Idempotency Key1').item.json.orderId }}",
+            "errorType": "",
+            "errorMessage": ""
+          },
+          "matchingColumns": [
+            "idempotencyKey"
+          ],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a35863ea-8bec-4691-97e3-467d1293e4b8",
+      "name": "Update Log - Success1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1904,
+        1504
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gXzAysXV4jUiDVvE",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { statusCode: 200, body: { status: 'success', message: `Order ${$('Generate Idempotency Key1').item.json.orderId} processed successfully.` } } }];"
+      },
+      "id": "18853459-ca2a-45c9-8804-6a5f5db0147e",
+      "name": "Build Success Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "60eb1ad0-64b1-4e61-b12b-7fd281a5dc0c",
+      "name": "Respond - Success1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2304,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $('Generate Idempotency Key1').item.json.idempotencyKey }}",
+            "status": "failed",
+            "errorType": "non_retryable_status",
+            "errorMessage": "Inventory API returned 409 conflict (insufficient stock / duplicate reservation).",
+            "timestamp": "={{ new Date().toISOString() }}",
+            "row_number": 0,
+            "orderId": "={{ $('Generate Idempotency Key1').item.json.orderId }}"
+          },
+          "matchingColumns": [
+            "idempotencyKey"
+          ],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "3bcb4eac-b7a7-4cf9-b17d-b9acf24cf4b0",
+      "name": "Update Log - Inventory Failed1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1840,
+        1680
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "gXzAysXV4jUiDVvE",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { statusCode: 409, body: { status: 'failed', message: 'Inventory reservation failed: conflict/insufficient stock.' } } }];"
+      },
+      "id": "7c03645b-b7eb-4e31-8093-6de0daa45f43",
+      "name": "Build Inventory Failure Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2288,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "29038c4f-cfa4-4344-b744-91b57010652c",
+      "name": "Respond - Inventory Failed1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2496,
+        1680
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "okashajaved.octacer@gmail.com",
+        "subject": "Order Alert: Inventory reservation failed (409)",
+        "message": "={{ `Order ${$('Generate Idempotency Key1').item.json.orderId} failed inventory reservation (409 conflict) at ${new Date().toISOString()}` }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2048,
+        1680
+      ],
+      "id": "fbe6b81b-1b06-428b-907d-7ec86f627fe3",
+      "name": "Alert - Inventory Failed",
+      "webhookId": "82303ba3-533a-47cf-837a-88775649c141",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Og3bcrNVQUuuEm4z",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "okashajaved.octacer@gmail.com",
+        "subject": "Order Alert: Payment failed",
+        "message": "={{ `Order ${$json.orderId} failed (${$json.errorType}): ${$json.errorMessage} at ${$json.timestamp}` }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2256,
+        1872
+      ],
+      "id": "50f792ee-bc0e-47a2-8497-6927b7df31b4",
+      "name": "Alert - Payment Failed",
+      "webhookId": "4c66d2d5-c6f1-4523-b8a5-83f5a52ca6fa",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "Og3bcrNVQUuuEm4z",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "69f93cec-43cd-4d3c-8840-fc84e4abf906",
+      "name": "Retry Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1040,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://bd84f8b1-493e-4a3e-9def-0fd3cd847470.mock.pstmn.io/charge",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-mock-response-name",
+              "value": "={{ $('Generate Idempotency Key1').item.json.paymentTestMode === 'always_success' ? '200-success' : ($('Generate Idempotency Key1').item.json.paymentTestMode === 'always_fail' ? '500-server-error' : ($('Retry Loop').item.json.attempt === 1 ? '429-rate-limited' : ($('Retry Loop').item.json.attempt === 2 ? '500-server-error' : '200-success'))) }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ orderId: $json.orderId, amount: $json.amount, idempotencyKey: $json.idempotencyKey }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "3fc4ab3a-d8f0-4908-80ba-403a73a3d950",
+      "name": "Call Payment API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1232,
+        1872
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://bd84f8b1-493e-4a3e-9def-0fd3cd847470.mock.pstmn.io/reserve",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-mock-response-name",
+              "value": "={{ $('Generate Idempotency Key1').item.json.inventoryTestMode === 'conflict' ? '409-conflict' : '200-success' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ orderId: $('Generate Idempotency Key1').item.json.orderId, idempotencyKey: $('Generate Idempotency Key1').item.json.idempotencyKey }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "4342c0c0-f5f2-4078-9dcd-b2406df812aa",
+      "name": "Call Inventory API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        1664
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Receive Order1": {
+      "main": [
+        [
+          {
+            "node": "Generate Idempotency Key1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Idempotency Key1": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Key1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Key1": {
+      "main": [
+        [
+          {
+            "node": "Key Exists?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Key Exists?1": {
+      "main": [
+        [
+          {
+            "node": "Build Cached Response1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Pending Log Row1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Cached Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Cached Result1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Pending Log Row1": {
+      "main": [
+        [
+          {
+            "node": "Build Retry Attempts1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Retry Attempts1": {
+      "main": [
+        [
+          {
+            "node": "Retry Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payment Success?1": {
+      "main": [
+        [
+          {
+            "node": "Call Inventory API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retry Payment?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Payment?1": {
+      "main": [
+        [
+          {
+            "node": "Backoff Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Payment Failure Details1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backoff Wait1": {
+      "main": [
+        [
+          {
+            "node": "Retry Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payment Failure Details1": {
+      "main": [
+        [
+          {
+            "node": "Update Log - Payment Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Log - Payment Failed1": {
+      "main": [
+        [
+          {
+            "node": "Alert - Payment Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payment Failure Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Payment Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inventory Success?1": {
+      "main": [
+        [
+          {
+            "node": "Update Log - Success1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Log - Inventory Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Log - Success1": {
+      "main": [
+        [
+          {
+            "node": "Build Success Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Success Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Log - Inventory Failed1": {
+      "main": [
+        [
+          {
+            "node": "Alert - Inventory Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Inventory Failure Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Inventory Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert - Inventory Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Inventory Failure Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert - Payment Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Payment Failure Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Loop": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Call Payment API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Payment API": {
+      "main": [
+        [
+          {
+            "node": "Payment Success?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Inventory API": {
+      "main": [
+        [
+          {
+            "node": "Inventory Success?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "Ak3CwpIV6juRsTZ5",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "b977200b-bab5-44a7-8db3-07bd41c44130",
+  "meta": {
+    "instanceId": "642eff7a7c7e2bf1faa410ff427f8947459bbb0c6feec4c8e2cf9f4b994f5841"
+  },
+  "nodeGroups": [],
+  "id": "yEgueESevTkGpQuB",
+  "tags": []
+}
