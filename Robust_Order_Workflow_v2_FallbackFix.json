@@ -1,0 +1,1531 @@
+{
+  "name": "Robust_Order_Workflow_v2_FallbackFix",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "order-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f991a11f-afcb-461c-a6d7-d3a4cee693d6",
+      "name": "Webhook - Receive Order1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2112,
+        240
+      ],
+      "webhookId": "order-webhook-id-placeholder"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst body = $input.first().json.body ?? $input.first().json;\n\nconst orderId = body.orderId;\nconst customerId = body.customerId;\nconst amount = body.amount;\n\nif (orderId === undefined || customerId === undefined || amount === undefined) {\n  throw new Error('Missing required fields: orderId, customerId, amount');\n}\n\n// Optional fields that let you control which saved Postman mock example\n// is returned, so you can demo each error path on demand.\n// paymentTestMode: 'normal' (429 -> 500 -> 200), 'always_success', 'always_fail'\n// inventoryTestMode: 'success', 'conflict'\nconst paymentTestMode = body.paymentTestMode || 'normal';\nconst inventoryTestMode = body.inventoryTestMode || 'success';\n\nconst raw = `${orderId}|${customerId}|${amount}`;\nconst idempotencyKey = crypto.createHash('sha256').update(raw).digest('hex');\n\nreturn [{\n  json: {\n    orderId,\n    customerId,\n    amount,\n    idempotencyKey,\n    paymentTestMode,\n    inventoryTestMode,\n    receivedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "6c6e6b47-f91c-4557-b90c-7b57146ae0ef",
+      "name": "Generate Idempotency Key1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1872,
+        240
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "idempotencyKey",
+              "lookupValue": "={{ $json.idempotencyKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ee240765-5627-493e-8984-412659548e85",
+      "name": "Check Existing Key1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1664,
+        240
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "LNwAGZG7fKE7EA1j",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.idempotencyKey }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              },
+              "id": "898f65e7-ec79-4ec5-87e2-0eec9111362c"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "82ed306b-5af9-476a-ad67-29ec855c73fb",
+      "name": "Key Exists?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1472,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json;\nlet statusCode;\nlet message;\n\nif (row.status === 'success') {\n  statusCode = 200;\n  message = 'Order already processed successfully (idempotent replay).';\n} else if (row.status === 'failed') {\n  statusCode = row.errorType === 'non_retryable_status' ? 409 : 500;\n  message = `Order previously failed: ${row.errorMessage || 'unknown error'}`;\n} else if (row.status === 'pending') {\n  statusCode = 202;\n  message = 'Order is still being processed. Please retry shortly.';\n} else {\n  // Defensive fallback: never silently report success when the\n  // logged status is missing/unrecognized.\n  statusCode = 500;\n  message = 'Order status could not be determined from the processing log.';\n}\n\nreturn [{\n  json: {\n    statusCode,\n    body: { status: row.status || 'unknown', message }\n  }\n}];"
+      },
+      "id": "ffa9c7ab-fc36-4e3e-8057-8de7eaade0cf",
+      "name": "Build Cached Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1264,
+        128
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "bf4bfb66-5c80-4cd7-84af-468f4d5b1329",
+      "name": "Respond - Cached Result1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1072,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $('Generate Idempotency Key1').item.json.idempotencyKey }}",
+            "orderId": "={{ $('Generate Idempotency Key1').item.json.orderId }}",
+            "timestamp": "={{ $('Generate Idempotency Key1').item.json.receivedAt }}",
+            "status": "pending",
+            "errorType": "",
+            "errorMessage": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "99534921-2fa8-4845-83e5-feabbe71ba8b",
+      "name": "Insert Pending Log Row1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1264,
+        368
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "LNwAGZG7fKE7EA1j",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const order = $('Generate Idempotency Key1').first().json;\nreturn [\n  { json: { ...order, attempt: 1 } },\n  { json: { ...order, attempt: 2 } },\n  { json: { ...order, attempt: 3 } }\n];"
+      },
+      "id": "8078159f-053b-4dd7-8dbd-51a8bb6e19f0",
+      "name": "Build Retry Attempts1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1072,
+        368
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              },
+              "id": "0ba98dbb-caf8-4caa-8d3a-b91306ec87dd"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fbed8b95-b36c-428c-bb46-760755976668",
+      "name": "Payment Success?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -464,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ [429, 500].includes($json.statusCode) }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              },
+              "id": "dcfaefed-83cc-46fe-b71f-bd5390323f7c"
+            },
+            {
+              "leftValue": "={{ $('Retry Loop').item.json.attempt }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "id": "232e6c93-16fb-4650-bc54-3585f74501ba"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8f858020-b42e-4454-9d23-fb8e381208e2",
+      "name": "Retry Payment?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -272,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.pow(2, $('Retry Loop').item.json.attempt) }}"
+      },
+      "id": "43c3f8b3-1afa-4617-8fe5-b0aed3046c0a",
+      "name": "Backoff Wait1",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -64,
+        560
+      ],
+      "webhookId": "f0ee199d-3cb0-435e-8e76-3b3aef603d54"
+    },
+    {
+      "parameters": {
+        "jsCode": "const attempt = $('Retry Loop').item.json.attempt;\nconst statusCode = $json.statusCode;\nconst order = $('Generate Idempotency Key1').item.json;\nconst errorType = ([429,500].includes(statusCode) && attempt >= 3) ? 'retry_exhausted' : 'non_retryable_status';\nreturn [{\n  json: {\n    idempotencyKey: order.idempotencyKey,\n    orderId: order.orderId,\n    errorType,\n    errorMessage: `Payment API failed with status ${statusCode} after ${attempt} attempt(s)`,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "7f4375d0-1958-4785-94ac-42d8c9fd85ba",
+      "name": "Build Payment Failure Details1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -64,
+        368
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $json.idempotencyKey }}",
+            "status": "failed",
+            "errorType": "={{ $json.errorType }}",
+            "errorMessage": "={{ $json.errorMessage }}",
+            "timestamp": "={{ $json.timestamp }}",
+            "row_number": 0,
+            "orderId": "={{ $json.orderId }}"
+          },
+          "matchingColumns": [
+            "idempotencyKey"
+          ],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "dfe2decd-af4f-441b-b0b3-a1937ab4424f",
+      "name": "Update Log - Payment Failed1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        144,
+        368
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "LNwAGZG7fKE7EA1j",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Build Payment Failure Details1').item.json;\nconst statusCode = d.errorType === 'non_retryable_status' ? 409 : 500;\nreturn [{ json: { statusCode, body: { status: 'failed', message: d.errorMessage } } }];"
+      },
+      "id": "7800046f-46c8-4358-a708-4406ec4f4fb4",
+      "name": "Build Payment Failure Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "8ccafae1-2615-48cd-91c0-cb639a5dd34c",
+      "name": "Respond - Payment Failed1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        752,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              },
+              "id": "851501fb-abc5-46c2-9f80-8464ff4036fe"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fc054a29-b968-4618-9b77-9a34535a9fee",
+      "name": "Inventory Success?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -272,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $('Generate Idempotency Key1').item.json.idempotencyKey }}",
+            "status": "success",
+            "timestamp": "={{ new Date().toISOString() }}",
+            "row_number": 0,
+            "orderId": "={{ $('Generate Idempotency Key1').item.json.orderId }}",
+            "errorType": "",
+            "errorMessage": ""
+          },
+          "matchingColumns": [
+            "idempotencyKey"
+          ],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8f415cbd-3004-4701-a757-db272201d256",
+      "name": "Update Log - Success1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "LNwAGZG7fKE7EA1j",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { statusCode: 200, body: { status: 'success', message: `Order ${$('Generate Idempotency Key1').item.json.orderId} processed successfully.` } } }];"
+      },
+      "id": "3c3cb3f9-db64-41bd-ad99-e105528ded93",
+      "name": "Build Success Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "a1789293-d541-4112-94bf-97ebf8163024",
+      "name": "Respond - Success1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $('Generate Idempotency Key1').item.json.idempotencyKey }}",
+            "status": "failed",
+            "errorType": "non_retryable_status",
+            "errorMessage": "Inventory API returned 409 conflict (insufficient stock / duplicate reservation).",
+            "timestamp": "={{ new Date().toISOString() }}",
+            "row_number": 0,
+            "orderId": "={{ $('Generate Idempotency Key1').item.json.orderId }}"
+          },
+          "matchingColumns": [
+            "idempotencyKey"
+          ],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "361c4cd2-db29-473c-8b8d-6a067b7f978c",
+      "name": "Update Log - Inventory Failed1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -64,
+        176
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "LNwAGZG7fKE7EA1j",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { statusCode: 409, body: { status: 'failed', message: 'Inventory reservation failed: conflict/insufficient stock.' } } }];"
+      },
+      "id": "1c7e75c2-8093-460f-a8ef-6558df0ab7de",
+      "name": "Build Inventory Failure Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        384,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "8717600d-76cd-44e7-a12f-8d1d051505a3",
+      "name": "Respond - Inventory Failed1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        592,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "okashajaved.octacer@gmail.com",
+        "subject": "Order Alert: Inventory reservation failed (409)",
+        "message": "={{ `Order ${$('Generate Idempotency Key1').item.json.orderId} failed inventory reservation (409 conflict) at ${new Date().toISOString()}` }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        144,
+        176
+      ],
+      "id": "2f771988-a499-4513-8359-67c729080fef",
+      "name": "Alert - Inventory Failed",
+      "webhookId": "82303ba3-533a-47cf-837a-88775649c141",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rVM05dhmv11jSyYy",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "okashajaved.octacer@gmail.com",
+        "subject": "Order Alert: Payment failed",
+        "message": "={{ `Order ${$json.orderId} failed (${$json.errorType}): ${$json.errorMessage} at ${$json.timestamp}` }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        352,
+        368
+      ],
+      "id": "d936f92c-ea1e-43a4-9e93-dd602421f7e1",
+      "name": "Alert - Payment Failed",
+      "webhookId": "4c66d2d5-c6f1-4523-b8a5-83f5a52ca6fa",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rVM05dhmv11jSyYy",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "a42b97d8-934f-40f7-b805-603113ed1de7",
+      "name": "Retry Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -864,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://bd84f8b1-493e-4a3e-9def-0fd3cd847470.mock.pstmn.io/charge",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-mock-response-name",
+              "value": "={{ $('Generate Idempotency Key1').item.json.paymentTestMode === 'always_success' ? '200-success' : ($('Generate Idempotency Key1').item.json.paymentTestMode === 'always_fail' ? '500-server-error' : ($('Retry Loop').item.json.attempt === 1 ? '429-rate-limited' : ($('Retry Loop').item.json.attempt === 2 ? '500-server-error' : '200-success'))) }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ orderId: $json.orderId, amount: $json.amount, idempotencyKey: $json.idempotencyKey }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a57cd033-835e-4468-bb8c-f788051f40d6",
+      "name": "Call Payment API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -672,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://bd84f8b1-493e-4a3e-9def-0fd3cd847470.mock.pstmn.io/reserve",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-mock-response-name",
+              "value": "={{ $('Generate Idempotency Key1').item.json.inventoryTestMode === 'conflict' ? '409-conflict' : '200-success' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ orderId: $('Generate Idempotency Key1').item.json.orderId, idempotencyKey: $('Generate Idempotency Key1').item.json.idempotencyKey }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "165cd252-f116-44c2-97e5-df57a351d099",
+      "name": "Call Inventory API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -464,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst rawError = item.error || (item.json && item.json.error) || {};\nconst errorMessage = rawError.message || rawError.description || 'An unexpected error occurred';\nconst src = (item.json && item.json.body) ? { ...item.json, ...item.json.body } : (item.json || {});\n\n// Try to recover order context from earlier nodes even if this node's\n// own input never got that far.\nlet orderId = src.orderId;\nlet idempotencyKey = src.idempotencyKey;\ntry {\n  if (!orderId || !idempotencyKey) {\n    const genNode = $('Generate Idempotency Key1').item.json;\n    orderId = orderId || genNode.orderId;\n    idempotencyKey = idempotencyKey || genNode.idempotencyKey;\n  }\n} catch (e) { /* Generate Idempotency Key1 itself may be the node that failed */ }\n\nreturn [{\n  json: {\n    orderId: orderId || 'unknown',\n    idempotencyKey: idempotencyKey || 'unknown',\n    errorType: 'unhandled_exception',\n    errorMessage,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "3b6fe4ca-e510-4585-8378-f5bfc7fed65e",
+      "name": "Handle Unexpected Error1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -864,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o",
+          "mode": "list",
+          "cachedResultName": "Order Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/131UNt0pUbPnGxOrtdoMnooYN8hftIygNOEicllymT8o/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotencyKey": "={{ $json.idempotencyKey }}",
+            "orderId": "={{ $json.orderId }}",
+            "status": "failed",
+            "errorType": "={{ $json.errorType }}",
+            "errorMessage": "={{ $json.errorMessage }}",
+            "timestamp": "={{ $json.timestamp }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "idempotencyKey",
+              "displayName": "idempotencyKey",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "orderId",
+              "displayName": "orderId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorType",
+              "displayName": "errorType",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "errorMessage",
+              "displayName": "errorMessage",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8c7352eb-5369-4d02-b047-3351452c6f38",
+      "name": "Log Unhandled Exception (Inline)1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -656,
+        816
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "LNwAGZG7fKE7EA1j",
+          "name": "Google Sheets account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "sendTo": "okashajaved.octacer@gmail.com",
+        "subject": "={{ `Order Alert: Unexpected Error (Order ${$json.orderId})` }}",
+        "message": "={{ `Order ${$json.orderId} hit an unhandled exception: ${$json.errorMessage} at ${$json.timestamp}` }}",
+        "options": {}
+      },
+      "id": "495a4bc8-6658-4bae-b4b7-28474ff23c0c",
+      "name": "Alert - Unhandled Exception (Inline)1",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -448,
+        816
+      ],
+      "webhookId": "822ff882-614a-45cd-b9cd-8426fb979d37",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "rVM05dhmv11jSyYy",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('Handle Unexpected Error1').item.json;\nreturn [{\n  json: {\n    statusCode: 500,\n    body: {\n      status: 'failed',\n      message: `Unexpected error while processing order ${d.orderId}: ${d.errorMessage}`\n    }\n  }\n}];"
+      },
+      "id": "ac81edf3-46c4-456c-8411-229f7c7b33dc",
+      "name": "Build Unhandled Error Response1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "ba6b09f3-5e3a-4112-9f2e-d21b23f316e3",
+      "name": "Respond - Unhandled Error1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -32,
+        816
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Receive Order1": {
+      "main": [
+        [
+          {
+            "node": "Generate Idempotency Key1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Idempotency Key1": {
+      "main": [
+        [
+          {
+            "node": "Check Existing Key1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Unexpected Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Existing Key1": {
+      "main": [
+        [
+          {
+            "node": "Key Exists?1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Unexpected Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Key Exists?1": {
+      "main": [
+        [
+          {
+            "node": "Build Cached Response1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Insert Pending Log Row1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Cached Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Cached Result1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Unexpected Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Pending Log Row1": {
+      "main": [
+        [
+          {
+            "node": "Build Retry Attempts1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Unexpected Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Retry Attempts1": {
+      "main": [
+        [
+          {
+            "node": "Retry Loop",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Unexpected Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Payment Success?1": {
+      "main": [
+        [
+          {
+            "node": "Call Inventory API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Retry Payment?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Payment?1": {
+      "main": [
+        [
+          {
+            "node": "Backoff Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Payment Failure Details1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backoff Wait1": {
+      "main": [
+        [
+          {
+            "node": "Retry Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payment Failure Details1": {
+      "main": [
+        [
+          {
+            "node": "Update Log - Payment Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Log - Payment Failed1": {
+      "main": [
+        [
+          {
+            "node": "Alert - Payment Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payment Failure Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Payment Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inventory Success?1": {
+      "main": [
+        [
+          {
+            "node": "Update Log - Success1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update Log - Inventory Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Log - Success1": {
+      "main": [
+        [
+          {
+            "node": "Build Success Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Success Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Log - Inventory Failed1": {
+      "main": [
+        [
+          {
+            "node": "Alert - Inventory Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Inventory Failure Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Inventory Failed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert - Inventory Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Inventory Failure Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert - Payment Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Payment Failure Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Loop": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Call Payment API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Payment API": {
+      "main": [
+        [
+          {
+            "node": "Payment Success?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Inventory API": {
+      "main": [
+        [
+          {
+            "node": "Inventory Success?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Unexpected Error1": {
+      "main": [
+        [
+          {
+            "node": "Log Unhandled Exception (Inline)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Unhandled Exception (Inline)1": {
+      "main": [
+        [
+          {
+            "node": "Alert - Unhandled Exception (Inline)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert - Unhandled Exception (Inline)1": {
+      "main": [
+        [
+          {
+            "node": "Build Unhandled Error Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Unhandled Error Response1": {
+      "main": [
+        [
+          {
+            "node": "Respond - Unhandled Error1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "5XOD6OmkrSTLZ1aW",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "1d4f5ce6-6918-45e9-8ba7-8c25d34afcbe",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8942ced4274b53b4e17d78e836ce7937d58bdc74c5c06f3e1657fe125f390dd2"
+  },
+  "nodeGroups": [],
+  "id": "FsPvwNwxEMnmytDQ",
+  "tags": []
+}
